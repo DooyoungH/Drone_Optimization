@@ -12,26 +12,36 @@ ROS는 로봇산업분야에서 많이 사용되고 있는 툴로써 로봇을 U
 ## 2. 환경 설정
 기본적으로 ROS는 Linux 환경을 사용합니다. 현재 제가 사용하는 환경은 Ubuntu 16.04 LTS 와 ROS Kinetic 을 사용하며, ROS kinetic 의 경우 오로카에서 표윤석 박사님이 작성하신 한 줄 설치 코드로 쉽게 설치 할 수 있습니다.
 
-'''
+```
 wget https://raw.githubusercontent.com/ROBOTIS-GIT/robotis_tools/master/install_ros_kinetic.sh && chmod 755 ./install_ros_kinetic.sh && bash ./install_ros_kinetic.sh
-'''
+```
 
 Onboard computer (라즈베리파이) 의 경우 는 다음의 코드로 한 줄 설치가 가능합니다.
 
-'''
+```
 wget https://raw.githubusercontent.com/ROBOTIS-GIT/robotis_tools/master/install_ros_kinetic_rp3.sh && chmod 755 ./install_ros_kinetic_rp3.sh && bash ./install_ros_kinetic_rp3.sh
-'''
+```
 
 [출처] ROS Kinetic 1줄 설치! (오픈소스 소프트웨어 & 하드웨어: 로봇 기술 공유 카페 (오로카)) |작성자 표윤석
 
 
-## 3. 
+## 3. TEST RUN
+ROS 가 설치 되었다면 설치가 제대로 완료되었는지 기본적으로 테스트가 필요합니다.
 
 
-해당 폴더에 포함된 내용은 다음과 같습니다.
-* RTOS 를 이용한 임베디드 보드의 전력 소모 측정 코드
-  * 우리는 TI 사의 MCU 를 토대로 하는 임베디드 보드를 제작하였으며, 해당 보드는 매우 높은 정확도와 1 kHz의 샘플링레이트를 가집니다.
-  * 문서로 남겨 놓은 사항은 TI 사의 IDE인 CCS의 세팅과 작성한 코드에 대한 설명으로, 코드가 동작하는 플로우와 각 함수의 역할을 설명하고자 합니다. 
+
+
+## 4. 내용 구성
+Turtlesim 이 제대로 돌아간다면 기본적인 세팅은 완료 된 것입니다. 
+ROS 를 제대로 활용하기 위하여 앞으로 진행 할 내용은 다음과 같습니다.
+
+* ROS 의 기본적인 설계 개념과 퍼블리셔 및 서브스크라이버 제작해보기 (roscpp, rospy)
+* URDF 를 이용한 Two wheel robot 제작 및 rospy 를 통해서 로봇을 움직여보기
+* Gazobo 를 이용한 환경 구성 및 Two wheel robot 에 환경 적용해보기
+* Two wheel robot 과 센서를 이용한 maze 탈출 코드 구현 및 적용해보기
+* PX4 시뮬레이션 환경 구현
+* 드론의 비행 환경 Gazebo 로 구현해보기
+* 강화학습을 통한 드론의 최적화 비행 구현  
 
 
 
