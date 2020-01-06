@@ -45,8 +45,5 @@ ROS 를 제대로 활용하기 위하여 앞으로 진행 할 내용은 다음�
 
 
 
-
-
-
 [1] : https://cafe.naver.com/openrt 
  
