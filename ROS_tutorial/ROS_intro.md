@@ -25,13 +25,20 @@ wget https://raw.githubusercontent.com/ROBOTIS-GIT/robotis_tools/master/install_
 [출처] ROS Kinetic 1줄 설치! (오픈소스 소프트웨어 & 하드웨어: 로봇 기술 공유 카페 (오로카)) |작성자 표윤석
 
 
-## 3. TEST RUN
+## 3. IDE
+
+```
+
+```
+
+
+## 4. TEST RUN
 ROS 가 설치 되었다면 설치가 제대로 완료되었는지 기본적으로 테스트가 필요합니다.
 
 
 
 
-## 4. 내용 구성
+## 5. 내용 구성
 Turtlesim 이 제대로 돌아간다면 기본적인 세팅은 완료 된 것입니다. 
 ROS 를 제대로 활용하기 위하여 앞으로 진행 할 내용은 다음과 같습니다.
 
