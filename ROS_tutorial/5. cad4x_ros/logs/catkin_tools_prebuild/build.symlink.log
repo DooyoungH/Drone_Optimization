@@ -1,0 +1,12 @@
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./_setup_util.py
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./local_setup.bash
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./cmake.lock
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./setup.bash
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./local_setup.sh
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./setup.sh
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./setup.zsh
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./env.sh
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/./local_setup.zsh
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/lib/pkgconfig/catkin_tools_prebuild.pc
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/share/catkin_tools_prebuild/cmake/catkin_tools_prebuildConfig.cmake
+Symlinking /home/parallels/catkin_ws/src/cad4x_ros/devel/share/catkin_tools_prebuild/cmake/catkin_tools_prebuildConfig-version.cmake

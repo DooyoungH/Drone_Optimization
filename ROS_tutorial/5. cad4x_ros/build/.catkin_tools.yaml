@@ -1,0 +1,6 @@
+devel_space: /home/parallels/catkin_ws/src/cad4x_ros/devel
+install: false
+install_space: /home/parallels/catkin_ws/src/cad4x_ros/install
+profile: default
+source_space: /home/parallels/catkin_ws/src/cad4x_ros/src
+workspace: /home/parallels/catkin_ws/src/cad4x_ros
