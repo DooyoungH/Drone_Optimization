@@ -19,7 +19,10 @@
 로봇 공학 분야에서 유명하신 엄태웅님께서 설명해 주신 오일러 각 회전에 대한 유튜브 동영상[1]을 한번 참고 하시면 좋습니다.
 
 
-
+## 5. 2차 관성 모멘트
+ixx = constant value * mass(y^2 + z^2)
+iyy = constant value * mass(x^2 + z^2)
+izz = constant value * mass(y^2 + x^2)
 
 
 
