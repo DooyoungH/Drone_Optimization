@@ -12,35 +12,37 @@ import numpy as np
 from mavros_msgs.msg import *
 from mavros_msgs.srv import *
 
-# talker
-from std_msgs.msg import String, Bool
-from sensor_msgs.msg  import Image
+from std_msgs.msg import String
+from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 
 # pending service
 from cad4x_ros.srv import image_srv, image_srvResponse
 
+class Depth_00:
 
-class RGB_00:
-    
     def __init__(self):
         self.bridge = CvBridge()
         self.cv_image = None
-        self.image_pub = rospy.Publisher("RGB_00", Image, queue_size=10)
-        self.image_sub = rospy.Subscriber("/iris_0/camera_red_iris/image_raw", Image, self.callback)
-        
-    def callback(self, data):
+        self.image_pub = rospy.Publisher("Depth_00",Image, queue_size=10)
+        self.image_sub = rospy.Subscriber("/uav0/depth/depth/image_raw", Image, self.callback)
+
+    def callback(self,data):
         try:
-            self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+            self.cv_image = self.bridge.imgmsg_to_cv2(data, "passthrough")        
+            #self.cv_image = self.cv_image.reshape(320,480)
+            # print(self.cv_image.reshape(320, 480, 1).shape)
+            #cv_image_array = self.bridge.imgmsg_to_cv2(data, "8UC1")
+            #cv_image_array = np.array(cv_image, dtype = np.float32)
+            #cv_image_norm = cv2.normalize(cv_image_array, cv_image_array, 0, 1, cv2.NORM_MINMAX)
         except CvBridgeError as e:
             print(e)
-        
-        self.dst = cv2.resize(self.cv_image, dsize=(480,320), interpolation=cv2.INTER_AREA).astype(np.float32)
+
         #cv2.imshow("Image window", self.cv_image)
-        #cv2.waitKey(2)
-     
+        #cv2.waitKey(3)
+
         try:
-            self.image_pub.publish(self.bridge.cv2_to_imgmsg(self.cv_image, "bgr8"))
+            self.image_pub.publish(self.bridge.cv2_to_imgmsg(self.cv_image, "passthrough"))
         except CvBridgeError as e:
             print(e)
 
@@ -54,13 +56,14 @@ class RGB_00:
         request = 'False'
     
         return image_srvResponse(request)
-      
+
+
 def main():
     
-    rospy.init_node('RGB_image_node', anonymous=True)
-    ic = RGB_00()
+    rospy.init_node('Depth_image_node', anonymous=True)
+    ic = Depth_00()
     
-    image_service = rospy.Service('RGB_pending', image_srv, ic.image_signal_response)
+    image_service = rospy.Service('Depth_pending', image_srv, ic.image_signal_response)
     
     while (not rospy.is_shutdown()):
         try:
@@ -73,4 +76,3 @@ if __name__ == '__main__':
         main()
     except rospy.ROSInterruptException:
         pass
-        

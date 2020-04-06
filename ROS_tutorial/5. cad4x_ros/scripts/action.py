@@ -44,25 +44,28 @@ class data_publisher:
 
         # Setpoint publisher    
         self.target_00 = rospy.Publisher('Target_00', PositionTarget, queue_size=1)
-        self.target_01 = rospy.Publisher('Target_01', PositionTarget, queue_size=1)
-        self.target_02 = rospy.Publisher('Target_02', PositionTarget, queue_size=1)
+        # self.target_01 = rospy.Publisher('Target_01', PositionTarget, queue_size=1)
+        # self.target_02 = rospy.Publisher('Target_02', PositionTarget, queue_size=1)
         
         
 class data_subcriber:
     
-    def __init__(self):
+    def __init__(self, drone_position):
         # Initialize the subscriber messages
         self.Test_resume = None
         self.action_index = None
         self.laser_array = None
+        self.origin = None
         self.reset = False
+        self.drone_position = drone_position
         
         # set up the subscriber
         self.dqn_action_idx = rospy.Subscriber('action_idx_msg', DQN_to_CNT, self.action_callback)
         self.sub_laser_00 = rospy.Subscriber('/uav0/laser/scan', LaserScan, self.callback_laser)
         
-        self.sub_reset_00 = rospy.Subscriber('Reset_00', Bool, self.callback_reset)
-        
+        self.sub_reset_00 = rospy.Subscriber('Reset_00', Bool, self.callback_reset)       
+        self.sub_position_00 = rospy.Subscriber('/uav0/mavros/local_position/pose', PoseStamped, self.posCb)
+
     # Callback functions
     def action_callback(self, data):
         self.action_index = data.action
@@ -80,6 +83,15 @@ class data_subcriber:
             min(min(data.ranges[80:99]), 3),
             min(min(data.ranges[100:119]), 3),
         ]
+    
+    def posCb(self, msg):
+        self.origin= [
+            self.drone_position[0] + msg.pose.position.x,
+            self.drone_position[1] + msg.pose.position.y,
+            self.drone_position[2] + msg.pose.position.z,
+        ]
+
+
 
 
 # Main function
@@ -99,10 +111,15 @@ def main():
     cnt_00 = mob.Controller()
     cnt_01 = mob.Controller()
     cnt_02 = mob.Controller()
+
+    drone_position = [245, -245, 0]
     
     pub_to_dqn = data_publisher()
-    sub_from_dqn = data_subcriber()
+    sub_from_dqn = data_subcriber(drone_position)
     
+    step_reward = -0.1
+    max_height = 45.0
+
     # importing the off_board object 
     board = mob.off_board(modes_00, modes_01, modes_02, cnt_00, cnt_01, cnt_02)
 
@@ -125,6 +142,7 @@ def main():
     
         while (not rospy.is_shutdown()):    
             # positive x - Check OK
+            print(sub_from_dqn.origin)
             if sub_from_dqn.action_index == 0:
                 print("select the x-axis")
                 board.controller_00.x_dir()
@@ -141,7 +159,7 @@ def main():
                         pub_to_dqn.pub_reset_00.publish(data=True)
                         sub_from_dqn.reset = True
                         break
-                    if -1.0 >= board.controller_00.sp.position.z or board.controller_00.sp.position.z >= 80.0:
+                    if -1.0 >= board.controller_00.sp.position.z or board.controller_00.sp.position.z >= max_height:
                         board.controller_00.stop()
                         pub_to_dqn.target_00.publish(board.controller_00.sp)
                         pub_to_dqn.pub_reset_00.publish(data=True)
@@ -152,9 +170,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = step_reward
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -163,16 +181,15 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)   
+                    rospy.sleep(0.1)                                                                     
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -181,12 +198,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp) 
+                    
+                    rospy.sleep(0.1) 
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -215,7 +233,7 @@ def main():
                         pub_to_dqn.pub_reset_00.publish(data=True)
                         sub_from_dqn.reset = True               
                         break
-                    if -1.0 >= board.controller_00.sp.position.z or board.controller_00.sp.position.z >= 80.0:
+                    if -1.0 >= board.controller_00.sp.position.z or board.controller_00.sp.position.z >= max_height:
                         board.controller_00.stop()
                         pub_to_dqn.target_00.publish(board.controller_00.sp)
                         pub_to_dqn.pub_reset_00.publish(data=True)
@@ -228,7 +246,7 @@ def main():
                 
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
-                    pub_to_dqn.reward_msg.data = 1.0
+                    pub_to_dqn.reward_msg.data = step_reward
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
                     #pub_to_dqn.reward.publish(data=1.0)
                 # 5. one time, publish the done message to DQN code
@@ -238,17 +256,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                     #if current position is terminal, action node is publishing the true signal
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                   
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -257,12 +275,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)     
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)     
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -304,9 +323,9 @@ def main():
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
                     #pub_to_dqn.reward.publish(data=2.0)
-                    pub_to_dqn.reward_msg.data = 2.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -314,16 +333,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                      
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -331,13 +351,14 @@ def main():
                     pub_to_dqn.pending_msg = 1
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)      
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)    
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -378,25 +399,26 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 3.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
                     pub_to_dqn.pending_msg = 1
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                  
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg) 
+
+                    rospy.sleep(0.1)
+
                     break        
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -405,12 +427,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)   
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1) 
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -451,9 +474,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -462,16 +485,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)   
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -480,12 +504,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -528,7 +553,7 @@ def main():
                 
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
-                    pub_to_dqn.reward_msg.data = 1.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
                     #pub_to_dqn.reward.publish(data=1.0)
                 # 5. one time, publish the done message to DQN code
@@ -539,17 +564,17 @@ def main():
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                     #if current position is terminal, action node is publishing the true signal
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                   
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)  
+
+                    rospy.sleep(0.1)                                                                 
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
-                    
+
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
                     
@@ -557,13 +582,14 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
                     pub_to_dqn.target_00.publish(board.controller_00.sp)     
-                    
+
+                    rospy.sleep(0.1)
+
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
                     while (not rospy.is_shutdown()):
@@ -605,9 +631,9 @@ def main():
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
                     #pub_to_dqn.reward.publish(data=2.0)
-                    pub_to_dqn.reward_msg.data = 2.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -615,16 +641,16 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                      
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+                    
+                    rospy.sleep(0.1)                                                                     
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -633,13 +659,14 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
                     pub_to_dqn.target_00.publish(board.controller_00.sp)      
-                    
+
+                    rospy.sleep(0.1)
+
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
                     while (not rospy.is_shutdown()):
@@ -679,9 +706,8 @@ def main():
                         
                 if sub_from_dqn.reset == False:              
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 3.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -689,15 +715,14 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                  
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)  
+                    rospy.sleep(0.1)                                                                
                     break        
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -706,13 +731,14 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
                     pub_to_dqn.target_00.publish(board.controller_00.sp)   
                     
+                    rospy.sleep(0.1)
+
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
                     while (not rospy.is_shutdown()):
@@ -751,9 +777,9 @@ def main():
 
                 if sub_from_dqn.reset == False:
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -762,16 +788,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg) 
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -780,12 +807,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -826,9 +854,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -837,16 +865,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -855,12 +884,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -902,9 +932,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -913,16 +943,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -931,12 +962,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -980,9 +1012,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -991,16 +1023,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1009,12 +1042,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1056,9 +1090,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1067,16 +1101,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1085,12 +1120,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1132,9 +1168,9 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1143,16 +1179,16 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)                                                                        
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1160,13 +1196,14 @@ def main():
                     pub_to_dqn.pending_msg = 1
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1208,9 +1245,9 @@ def main():
 
                 if sub_from_dqn.reset == False:               
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1219,9 +1256,11 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
@@ -1285,7 +1324,7 @@ def main():
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
-                    pub_to_dqn.reward_msg.data = 1.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
                     #pub_to_dqn.reward.publish(data=1.0)
                 # 5. one time, publish the done message to DQN code
@@ -1296,16 +1335,17 @@ def main():
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                     #if current position is terminal, action node is publishing the true signal
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                   
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg) 
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1314,12 +1354,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)     
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+                    
+                    rospy.sleep(0.1)
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1362,10 +1403,8 @@ def main():
                 if sub_from_dqn.reset == False:                               
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
-                    #pub_to_dqn.reward.publish(data=2.0)
-                    pub_to_dqn.reward_msg.data = 2.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -1373,16 +1412,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                      
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1391,12 +1431,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)      
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)      
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1438,9 +1479,9 @@ def main():
 
                 if sub_from_dqn.reset == False:                                        
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 3.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -1448,15 +1489,16 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                  
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break        
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1465,12 +1507,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)   
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)   
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1511,9 +1554,9 @@ def main():
 
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1522,16 +1565,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1540,12 +1584,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1586,9 +1631,9 @@ def main():
 
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1596,17 +1641,18 @@ def main():
                     pub_to_dqn.pending_msg = 1
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg) 
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1615,12 +1661,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1661,9 +1708,9 @@ def main():
 
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1671,10 +1718,12 @@ def main():
                     pub_to_dqn.pending_msg = 1
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
@@ -1736,9 +1785,9 @@ def main():
 
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1747,16 +1796,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    
+                    rospy.sleep(0.1)
+                    
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1765,12 +1815,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1812,9 +1863,9 @@ def main():
 
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 0.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                     #if current position is terminal, action node is publishing the true signal
@@ -1823,16 +1874,17 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                        
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1841,12 +1893,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)  
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)  
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1889,9 +1942,9 @@ def main():
                 if sub_from_dqn.reset == False:                
                 # 4. one time, publish the reward to DQN code
                 # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
-                    pub_to_dqn.reward_msg.data = 1.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    #pub_to_dqn.reward.publish(data=1.0)
+
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -1900,16 +1953,17 @@ def main():
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                     #if current position is terminal, action node is publishing the true signal
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                   
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1918,12 +1972,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)     
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)     
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -1965,9 +2020,7 @@ def main():
 
                 if sub_from_dqn.reset == False:               
                 # 4. one time, publish the reward to DQN code
-                # pub_to_dqn.pub_reward.publish(pub_to_dqn.reward_msg)
-                    #pub_to_dqn.reward.publish(data=2.0)
-                    pub_to_dqn.reward_msg.data = 2.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
                     rospy.sleep(0.1)
                 # 5. one time, publish the done message to DQN code
@@ -1976,17 +2029,18 @@ def main():
                     pub_to_dqn.pending_msg = 1
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
-                        
-                    rospy.sleep(0.1)
+
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                      
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+
+                    rospy.sleep(0.1)
+
                     break
                 
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -1995,12 +2049,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)      
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)      
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones
@@ -2043,9 +2098,8 @@ def main():
                 if sub_from_dqn.reset == False:
                 
                 # 4. one time, publish the reward to DQN code
-                    pub_to_dqn.reward_msg.data = 3.0
+                    pub_to_dqn.reward_msg.data = -0.1
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                 # 5. one time, publish the done message to DQN code
                     pub_to_dqn.done.publish(data=False)
                 
@@ -2053,15 +2107,16 @@ def main():
                 # 6. publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
-                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)                                                                  
+                    pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
+                    
+                    rospy.sleep(0.1)
+
                     break        
                 else:
                     # When simulater is restarted because of the obstacles, the agents gain negative rewards 
                     pub_to_dqn.reward_msg.data = -100.0
                     pub_to_dqn.DQN_reward.publish(pub_to_dqn.reward_msg)
-                    rospy.sleep(0.1)
                     
                     # Then action py publish the done message to DQN code
                     pub_to_dqn.done.publish(data=True)
@@ -2070,12 +2125,13 @@ def main():
                     # publish the pending signal message to DQN code
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
                         
-                    rospy.sleep(0.1)
                     pub_to_dqn.pending_msg = 0
                     pub_to_dqn.DQN_resume.publish(pub_to_dqn.pending_msg)
 
                     board.controller_00.origin()
-                    pub_to_dqn.target_00.publish(board.controller_00.sp)   
+                    pub_to_dqn.target_00.publish(board.controller_00.sp)
+
+                    rospy.sleep(0.1)   
                     
                     sub_from_dqn.reset = False
                     # finally pending the action py code until initial states of drones

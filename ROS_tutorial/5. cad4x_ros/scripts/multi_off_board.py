@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 # ROS python API
 import rospy
+import math
 
 # 3D point & Stamped Pose msgs
-from geometry_msgs.msg import Point, PoseStamped
+from tf.transformations import euler_from_quaternion
+from geometry_msgs.msg import Point, PoseStamped, Quaternion, QuaternionStamped
 from std_srvs.srv import Empty
 from std_msgs.msg import Bool
 
@@ -236,8 +238,11 @@ class Controller:
         self.state = State()
         # Instantiate a setpoints message
         self.sp = PositionTarget()
+        self.ps = PoseStamped()
+
         # set the flag to use position setpoints and yaw angle
-        self.sp.type_mask = int('010111111000', 2)
+        self.sp.type_mask = 3064
+        #self.sp.type_mask = int('010111111000', 2)
         # LOCAL_NED
         self.sp.coordinate_frame = 1
 
@@ -256,17 +261,24 @@ class Controller:
         self.clbk_position_z = 3
         
         self.clbk_velocity_x = 0.0
-        self.clbk_velocity_y = 0.0 
+        self.clbk_velocity_y = 0.0
+
+        self.clbk_yaw = 2.3561
+        self.clbk_yaw_rate = 0.0
 
         # A Message for the current local position of the drone
         self.local_pos = Point(0.0, 0.0, 0)
+        self.local_ori = Quaternion(0.0, 0.0, 0.0, 0.0)
 
         # initial values for setpoints
         self.sp.position.x = 0.0
         self.sp.position.y = 0.0
         
         self.sp.velocity.x = 0.0
-        self.sp.velocity.y = 0.0
+        self.sp.velocity.y = 0
+        self.roll = 0
+        self.pitch = 0
+        self.yaw = 0
 
         # speed of the drone is set using MPC_XY_CRUISE parameter in MAVLink
         # using QGroundControl. By default it is 5 m/s.
@@ -279,6 +291,12 @@ class Controller:
         self.local_pos.y = msg.pose.position.y
         self.local_pos.z = msg.pose.position.z
 
+    def oriCb(self, msg):
+        self.local_ori.x = msg.pose.orientation.x
+        self.local_ori.y = msg.pose.orientation.y
+        self.local_ori.z = msg.pose.orientation.z
+        self.local_ori.w = msg.pose.orientation.w
+
     ## Drone State callback
     def stateCb(self, msg):
         self.state = msg
@@ -289,9 +307,15 @@ class Controller:
         self.sp.position.y = self.clbk_position_y
         self.sp.position.z = self.clbk_position_z
         
-        self.sp.velocity.x = self.clbk_velocity_x                               # control the velocity of drones
+        # control the velocity of drones
+        self.sp.velocity.x = self.clbk_velocity_x
         self.sp.velocity.y = self.clbk_velocity_y
        
+        # control the yaw of drones
+        self.sp.yaw = self.clbk_yaw
+        self.sp.yaw_rate = self.clbk_yaw_rate
+        
+
     def callback(self, msg):
         self.clbk_position_x = msg.position.x
         self.clbk_position_y = msg.position.y
@@ -301,90 +325,141 @@ class Controller:
         self.clbk_velocity_y = msg.velocity.y
         self.clbk_velocity_z = msg.velocity.z
 
+        self.clbk_yaw = msg.yaw
+        self.clbk_yaw_rate = msg.yaw_rate
+
     def x_dir(self):
     	self.sp.position.x = self.local_pos.x + 5
     	self.sp.position.y = self.local_pos.y
+
+        self.sp.yaw = math.radians(0)
+        self.sp.yaw_rate = 0.0
      
     def neg_x_dir(self):
     	self.sp.position.x = self.local_pos.x - 5
     	self.sp.position.y = self.local_pos.y
 
+        self.sp.yaw = math.radians(180)
+        self.sp.yaw_rate = 0.0
+
     def y_dir(self):
     	self.sp.position.x = self.local_pos.x
     	self.sp.position.y = self.local_pos.y + 5
 
+        self.sp.yaw = math.radians(90)
+        self.sp.yaw_rate = 0.0
+
     def neg_y_dir(self):
     	self.sp.position.x = self.local_pos.x
     	self.sp.position.y = self.local_pos.y - 5
+
+        self.sp.yaw = math.radians(-90)
+        self.sp.yaw_rate = 0.0
 
     def up(self):
         self.sp.position.x = self.local_pos.x
         self.sp.position.y = self.local_pos.y
         self.sp.position.z = self.local_pos.z + 5
     
-    # positive x + positive y
+    # positive x + positive y + yaw 45
     def action_4(self):
         self.sp.position.x = self.local_pos.x + 5
-        self.sp.position.y = self.local_pos.y + 5       
+        self.sp.position.y = self.local_pos.y + 5
+
+        self.sp.yaw = math.radians(45)
+        self.sp.yaw_rate = 0.0       
     
-    # positive x + negative y
+    # positive x + negative y + yaw -45
     def action_5(self):
         self.sp.position.x = self.local_pos.x + 5
         self.sp.position.y = self.local_pos.y - 5
+
+        self.sp.yaw = math.radians(-45)
+        self.sp.yaw_rate = 0.0
     
-    # negative x + positive y
+    # negative x + positive y + yaw 135
     def action_6(self):
         self.sp.position.x = self.local_pos.x - 5
         self.sp.position.y = self.local_pos.y + 5
+
+        self.sp.yaw = math.radians(135)
+        self.sp.yaw_rate = 0.0
     
-    # negative x + negative y    
+    # negative x + negative y + yaw -135    
     def action_7(self):
         self.sp.position.x = self.local_pos.x - 5
         self.sp.position.y = self.local_pos.y - 5
+
+        self.sp.yaw = math.radians(-135)
+        self.sp.yaw_rate = 0.0
     
-    # up + positive x
+    # up + positive x + yaw 0
     def action_10(self):
         self.sp.position.x = self.local_pos.x + 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(0)
+        self.sp.yaw_rate = 0.0
     
-    # up + positive y
+    # up + positive y + yaw 90
     def action_11(self):
         self.sp.position.y = self.local_pos.y + 5
         self.sp.position.z = self.local_pos.z + 5
     
-    # up + negative x
+        self.sp.yaw = math.radians(90)
+        self.sp.yaw_rate = 0.0
+
+    # up + negative x + yaw 180
     def action_12(self):
         self.sp.position.x = self.local_pos.x - 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(180)
+        self.sp.yaw_rate = 0.0
     
-    # up + negative y
+    # up + negative y + yaw -90
     def action_13(self):
         self.sp.position.y = self.local_pos.y - 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(-90)
+        self.sp.yaw_rate = 0.0
     
-    # up + positive x + positive y
+    # up + positive x + positive y + yaw 45
     def action_14(self):
         self.sp.position.x = self.local_pos.x + 5
         self.sp.position.y = self.local_pos.y + 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(45)
+        self.sp.yaw_rate = 0.0
     
-    # up + positive x + negative y
+    # up + positive x + negative y + yaw -45
     def action_15(self):
         self.sp.position.x = self.local_pos.x + 5
         self.sp.position.y = self.local_pos.y - 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(-45)
+        self.sp.yaw_rate = 0.0
     
-    # up + negative x + positive y
+    # up + negative x + positive y + yaw 135
     def action_16(self):
         self.sp.position.x = self.local_pos.x - 5
         self.sp.position.y = self.local_pos.y + 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(135)
+        self.sp.yaw_rate = 0.0
     
-    # up + negative x + negative y
+    # up + negative x + negative y + yaw -135
     def action_17(self):
         self.sp.position.x = self.local_pos.x - 5
         self.sp.position.y = self.local_pos.y - 5
         self.sp.position.z = self.local_pos.z + 5
+
+        self.sp.yaw = math.radians(-135)
+        self.sp.yaw_rate = 0.0
     
     # down + positive x
     def action_18(self):
@@ -447,6 +522,7 @@ class Controller:
 
         self.sp.velocity.x = 8.0
         self.sp.velocity.y = 8.0
+        self.sp.velocity.z = 0.5
 
     def origin_00(self):
         self.sp.position.x = 0.0
@@ -462,6 +538,17 @@ class Controller:
         self.sp.position.x = 0.0
         self.sp.position.y = 0.0
         self.sp.position.z = 3.0
+
+    def quaternion_to_euler(self):
+        quaternion = (
+            self.local_ori.w,
+            self.local_ori.x,
+            self.local_ori.y,
+            self.local_ori.z)
+        
+        euler = euler_from_quaternion(quaternion, axes="sxyz")
+
+        self.yaw = euler[2]
 
 
 class off_board:
@@ -488,9 +575,9 @@ class off_board:
         self.sub_position_01 = rospy.Subscriber('/uav1/mavros/local_position/pose', PoseStamped, self.controller_01.posCb)
         self.sub_position_02 = rospy.Subscriber('/uav2/mavros/local_position/pose', PoseStamped, self.controller_02.posCb)
         
+        self.sub_orientation_00 = rospy.Subscriber('/uav0/mavros/local_position/pose', QuaternionStamped, self.controller_00.oriCb)
+
         # Subscribe to drone's velocity
-    
-        #msg_sub = rospy.Subscriber('Test', PositionTarget, cnt.msgCb)
         self.sub_target_00 = rospy.Subscriber('Target_00', PositionTarget, self.controller_00.callback)
         self.sub_target_01 = rospy.Subscriber('Target_01', PositionTarget, self.controller_01.callback)
         self.sub_target_02 = rospy.Subscriber('Target_02', PositionTarget, self.controller_02.callback)
@@ -504,6 +591,7 @@ class off_board:
         self.pub_reset_00 = rospy.Publisher('Reset_00', Bool, queue_size=1)
         self.pub_reset_01 = rospy.Publisher('Reset_01', Bool, queue_size=1)
         self.pub_reset_02 = rospy.Publisher('Reset_02', Bool, queue_size=1)
+        
         self.sub_reset_00 = rospy.Subscriber('Reset_00', Bool, self.reset_callback)
         self.sub_reset_01 = rospy.Subscriber('Reset_01', Bool, self.reset_callback)
         self.sub_reset_02 = rospy.Subscriber('Reset_02', Bool, self.reset_callback)
@@ -585,6 +673,7 @@ def main():
     while (not rospy.is_shutdown()):
         board.position_update()
         board.rate.sleep()
+        board.controller_00.quaternion_to_euler()
         while (not rospy.is_shutdown()) and (board.reset == True):
             # 1. return the true value of board.reset from the action.py
             # 2. stop the all drones 

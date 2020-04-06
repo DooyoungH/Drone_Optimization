@@ -34,24 +34,52 @@ import tensorflow.keras.optimizers as ko
 np.random.seed(1)
 tf.random.set_seed(1)
 
-class image_send:
+class RGB_sub:
     
     def __init__(self):
         self.bridge = CvBridge()
         self.dst = None
         self.img_sample = None
-        self.image_sub = rospy.Subscriber("DQNimage_00", Image, self.callback)
-        self.img_service = rospy.ServiceProxy('image_pending', image_srv)
+        self.RGB_sub_00 = rospy.Subscriber("RGB_00", Image, self.callback)
+        # self.RGB_sub_01 = rospy.Subscriber("RGB_01", Image, self.callback)
+        self.RGB_service = rospy.ServiceProxy('RGB_pending', image_srv)
         
     def callback(self, data):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-            #print(self.cv_image)
         except CvBridgeError as e:
             print(e)    
         
-        self.img_sample = cv_image
-        self.dst = cv2.resize(cv_image, dsize=(100,100), interpolation=cv2.INTER_AREA).astype(np.float32)
+        rgb_array = np.array(cv_image, dtype=np.float32)
+        self.img_sample = cv2.normalize(rgb_array, rgb_array, 0, 1, cv2.NORM_MINMAX)
+        self.dst = cv2.resize(self.img_sample, dsize=(100,100), interpolation=cv2.INTER_AREA).astype(np.float32)
+
+
+class Depth_sub:
+
+    def __init__(self):
+        self.bridge = CvBridge()
+        self.dst = None
+        self.img_sample = None
+        self.Depth_sub_00 = rospy.Subscriber("Depth_00", Image, self.callback)
+        #self.Depth_sub_00 = rospy.Subscriber("Depth_00", Image, self.callback)
+        self.Depth_service = rospy.ServiceProxy('Depth_pending', image_srv)
+
+    def callback(self, data):
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(data, "passthrough")
+        except CvBridgeError as e:
+            print(e)    
+        
+        depth_array = np.array(cv_image, dtype=np.float32)
+        self.img_sample = cv2.normalize(depth_array, depth_array, 0, 1, cv2.NORM_MINMAX)
+        self.dst = cv2.resize(self.img_sample, dsize=(100,100), interpolation=cv2.INTER_AREA).astype(np.float32)
+        self.dst = self.dst.reshape(100,100,1)
+
+        # print(self.dst)
+
+        
+
 
 class data_publisher:
     
@@ -93,22 +121,52 @@ class Model(tf.keras.Model):
     
     def __init__(self, num_actions):
         super(Model, self).__init__()
-        self.conv1 = kl.Conv2D(16, kernel_size=(10,10), strides= 2, activation='relu')
-        self.conv2 = kl.Conv2D(32, kernel_size=(5,5), strides= 2 , activation='relu')
-        self.conv3 = kl.Conv2D(64, kernel_size=(3,3), strides= 2 , activation='relu')
-        self.flat = kl.Flatten()
-        self.fc1 = kl.Dense(512, activation = 'relu')
-        self.fc2 = kl.Dense(num_actions)
+        self.RGB_conv1 = kl.Conv2D(16, kernel_size=(10,10), strides=2, activation='relu')
+        self.RGB_conv2 = kl.Conv2D(32, kernel_size=(5,5), strides=2 , activation='relu')
+        self.RGB_conv3 = kl.Conv2D(64, kernel_size=(3,3), strides=2 , activation='relu')
+        self.RGB_flat = kl.Flatten()
+
+        self.depth_conv1 = kl.Conv2D(16, kernel_size=(10,10), strides=2, activation='relu')
+        self.depth_conv2 = kl.Conv2D(32, kernel_size=(5,5), strides=2, activation='relu')
+        self.depth_conv3 = kl.Conv2D(64, kernel_size=(3,3), strides=2, activation='relu')
+        self.depth_flat = kl.Flatten()
+
+        self.concatenate = kl.Add()
+
+        self.adv_dense = kl.Dense(512, activation = 'relu')
+        self.adv_out = kl.Dense(num_actions)
+
+        self.v_dense = kl.Dense(512, activation = 'relu')
+        self.v_out = kl.Dense(1)
+
+        self.lambda_layer = kl.Lambda(lambda x: x - tf.reduce_mean(x))
+        self.combine = kl.Add()
+
         
     def call(self, inputs):
         # x = tf.convert_to_tensor(inputs, dtype=tf.float32)
-        x = self.conv1(inputs)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.flat(x)
-        x = self.fc1(x)
-        x = self.fc2(x)
-        return x
+        x1 = self.RGB_conv1(inputs[0])
+        x1 = self.RGB_conv2(x1)
+        x1 = self.RGB_conv3(x1)
+        x1 = self.RGB_flat(x1)
+
+        x2 = self.depth_conv1(inputs[1])
+        x2 = self.depth_conv2(x2)
+        x2 = self.depth_conv3(x2)
+        x2 = self.depth_flat(x2)
+
+        x = self.concatenate([x1, x2])
+
+        adv = self.adv_dense(x)
+        adv = self.adv_out(adv)
+
+        v = self.v_dense(x)
+        v = self.v_out(v)
+
+        norm_adv = self.lambda_layer(adv)
+        combined = self.combine([v, norm_adv])
+
+        return combined
     
     def action_value(self, obs):
         q_values = self.predict(obs)
@@ -117,8 +175,8 @@ class Model(tf.keras.Model):
  
 class DQNAgent:
     
-    def __init__(self, model, target_model, state, img_send, pub, sub, num_actions, buffer_size=100, learning_rate=.001, epsilon=.1,
-                 epsilon_decay=0.995, min_epsilon=.01, gamma=.9, batch_size=4, target_update_iter=10, train_nums=500, 
+    def __init__(self, model, target_model, RGB_state, Depth_state, RGB, Depth, pub, sub, num_actions, buffer_size=100, learning_rate=.001, epsilon=.1,
+                 epsilon_decay=0.995, min_epsilon=.01, gamma=.9, batch_size=4, target_update_iter=10, train_nums=1000, 
                  start_learning=5):
         
         self.model = model
@@ -126,12 +184,13 @@ class DQNAgent:
         opt = ko.Adam(learning_rate=learning_rate, clipvalue= 10.0)             # do gredient clip
         self.model.compile(optimizer=opt, loss='mse')
         
-        self.img_send = img_send
+        self.RGB_img = RGB
+        self.Depth_img = Depth
         self.pub_to_action = pub
         self.sub_from_action = sub
         
         # parameters
-        self.state = state                              # gazebo environment
+        self.state = [RGB_state, Depth_state]           # gazebo environment
         self.lr = learning_rate                         # learning rate
         self.epsilon = epsilon                          # e-greedy when exploring
         self.epsilon_decay = epsilon_decay
@@ -148,11 +207,11 @@ class DQNAgent:
 
         # replay buffer
         # buffer_size * W * H * channel (100, 320, 480, 3)
-        self.states = np.empty((self.buffer_size,) + self.state.shape)
+        self.states = [np.empty((self.buffer_size,) + self.state[0].shape), np.empty((self.buffer_size,) + self.state[1].shape)]
         self.actions = np.empty((self.buffer_size), dtype=np.int8)
         self.rewards = np.empty((self.buffer_size), dtype=np.float32)
         self.dones = np.empty((self.buffer_size), dtype=np.bool)
-        self.next_states = np.empty((self.buffer_size,) + self.state.shape)
+        self.next_states = [np.empty((self.buffer_size,) + self.state[0].shape), np.empty((self.buffer_size,) + self.state[1].shape)]
         self.next_idx = 0
     '''
     def test(self, state):
@@ -195,12 +254,13 @@ class DQNAgent:
 
     def train(self):
         # 1. initialize the initail observation of the agent
-        state = self.img_send.dst                                               # bring the ficture from the image_search node
-        self.target_model.action_value(state[None])
+        state = [self.RGB_img.dst, self.Depth_img.dst]                                               # bring the ficture from the image_search node
+        non_state = [self.RGB_img.dst[None], self.Depth_img.dst[None]] 
+        self.target_model.action_value(non_state)
         for t in range(self.train_nums):
         # 2. input the state to the network model
         # Using [None] to extend its dimension [W, H, C] -> [batch, W, H, C]
-            best_action, q_values = self.model.action_value(state[None])
+            best_action, q_values = self.model.action_value(non_state)
         # 3. get the e-greedy action (Max Q or random action)
             action = self.get_action(best_action)
             # print("action", action)     
@@ -220,16 +280,16 @@ class DQNAgent:
             print("DQN code is resumed")     
            
         # 6. take the action in the env to return s', r, done
-            n_state, reward, done = self.img_send.dst, self.sub_from_action.reward, self.sub_from_action.done
+            n_state, reward, done = [self.RGB_img.dst, self.Depth_img.dst], self.sub_from_action.reward, self.sub_from_action.done
             
             print(t, reward, done)
             
-            self.ep_reward += reward            
+            # reward += reward            
             #img_sample = self.img_send.img_sample
             #img = cv2.resize(img_sample, dsize=(100,100), interpolation=cv2.INTER_AREA).astype(np.float32)
-            #cv2.imshow("Image window", img_sample)
-            #cv2.waitKey(1)
-            #rospy.sleep(0.1)
+            cv2.imshow("RGB", self.RGB_img.img_sample)
+            cv2.imshow("Depth", self.Depth_img.img_sample)
+            cv2.waitKey(1)
             
             # store that transition into replay buffer
             self.store_transition(state, action, reward, n_state, done)
@@ -261,10 +321,10 @@ class DQNAgent:
             
     def train_step(self):
         idxes = self.sample(self.batch_size)
-        self.s_batch = self.states[idxes]
+        self.s_batch = [self.states[0][idxes], self.states[1][idxes]]
         self.a_batch = self.actions[idxes]
         self.r_batch = self.rewards[idxes]
-        self.ns_batch = self.next_states[idxes]
+        self.ns_batch = [self.next_states[0][idxes], self.next_states[1][idxes]]
         self.done_batch = self.dones[idxes]
         
         # Local networks
@@ -309,10 +369,10 @@ class DQNAgent:
     # store transitions into replay buffer
     def store_transition(self, obs, action, reward, next_state, done):
         n_idx = self.next_idx % self.buffer_size
-        self.states[n_idx] = obs
+        self.states[0][n_idx], self.states[1][n_idx] = obs[0], obs[1]
         self.actions[n_idx] = action
         self.rewards[n_idx] = reward
-        self.next_states[n_idx] = next_state
+        self.next_states[0][n_idx], self.next_states[1][n_idx] = next_state[0], next_state[1]
         self.dones[n_idx] = done
         self.next_idx = (self.next_idx + 1) % self.buffer_size
         
@@ -350,12 +410,16 @@ def main():
     rospy.init_node('tf_DQN_node', anonymous= True)
         
      # wait for this service to be running
-    rospy.wait_for_service('image_pending', timeout=None)
+    rospy.wait_for_service('RGB_pending', timeout=None)
+    rospy.wait_for_service('Depth_pending', timeout=None)
 
     # Create the connection to the service.
-    img_service = rospy.ServiceProxy('image_pending', image_srv)
-  
-    img_send = image_send()
+    RGB_service = rospy.ServiceProxy('RGB_pending', image_srv)
+    Depth_service = rospy.ServiceProxy('Depth_pending', image_srv)
+
+    RGB = RGB_sub()
+    Depth = Depth_sub()
+
     pub = data_publisher()
     sub = data_subscriber()
     num_actions = 26                                         # env.action_space.n <= the number of action
@@ -367,13 +431,18 @@ def main():
     time.sleep(1.0) 
     
     # initialize the state
-    req_img = img_service('True')
-    state = img_send.dst
+    req_RGB = RGB_service('True')
+    rqe_Depth = Depth_service('True')
+    
+    RGB_state = RGB.dst
+    Depth_state = Depth.dst
+    #print(Depth_state.shape)
+
 
     print("initialize the state")
     time.sleep(1.0)
         
-    agent = DQNAgent(model, target_model, state, img_send, pub, sub, num_actions)
+    agent = DQNAgent(model, target_model, RGB_state, Depth_state, RGB, Depth, pub, sub, num_actions)
     
     agent.train()
     
