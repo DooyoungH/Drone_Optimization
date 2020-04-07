@@ -248,7 +248,7 @@ class Controller:
 
         # We will fly at a fixed altitude for now
         # Altitude setpoint, [meters]
-        self.ALT_SP = 3
+        self.ALT_SP = 10
         # update the setpoint message with the required altitude
         self.sp.position.z = self.ALT_SP
         # Step size for position update
@@ -258,7 +258,7 @@ class Controller:
         
         self.clbk_position_x = 0.0
         self.clbk_position_y = 0.0
-        self.clbk_position_z = 3
+        self.clbk_position_z = 10
         
         self.clbk_velocity_x = 0.0
         self.clbk_velocity_y = 0.0
@@ -273,6 +273,7 @@ class Controller:
         # initial values for setpoints
         self.sp.position.x = 0.0
         self.sp.position.y = 0.0
+        self.sp.position.z = 0.0
         
         self.sp.velocity.x = 0.0
         self.sp.velocity.y = 0
@@ -518,23 +519,13 @@ class Controller:
     def origin(self):
         self.sp.position.x = 0.0
         self.sp.position.y = 0.0
-        self.sp.position.z = 3.0
+        self.sp.position.z = 10.0
 
         self.sp.velocity.x = 8.0
         self.sp.velocity.y = 8.0
-        self.sp.velocity.z = 0.5
+        self.sp.velocity.z = 1.5
 
     def origin_00(self):
-        self.sp.position.x = 0.0
-        self.sp.position.y = 0.0
-        self.sp.position.z = 3.0
-
-    def origin_01(self):
-        self.sp.position.x = 0.0
-        self.sp.position.y = 0.0
-        self.sp.position.z = 3.0
-            
-    def origin_02(self):
         self.sp.position.x = 0.0
         self.sp.position.y = 0.0
         self.sp.position.z = 3.0
@@ -686,14 +677,14 @@ def main():
 
             stop_count += 1
             if (stop_count == 10):
-                print('working?')
+                print('Pending the off board for reset sequence')
                 while(not rospy.is_shutdown()):
                 
                     board.position_update()
                     board.rate.sleep()
                     
                     if board.reset == False:
-                        print("reset pending resume")
+                        print("resume the off board")
                         break
 
                 stop_count = 0

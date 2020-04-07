@@ -78,8 +78,6 @@ class Depth_sub:
 
         # print(self.dst)
 
-        
-
 
 class data_publisher:
     
@@ -87,7 +85,7 @@ class data_publisher:
         self.n_state = None
         
         # publish the action idx and pending message to action.py
-        self.pub_DQN_to_CNT = rospy.Publisher('action_idx_msg', DQN_to_CNT, queue_size=10)
+        self.pub_DQN_to_CNT = rospy.Publisher('action_index', DQN_to_CNT, queue_size=10)
         self.pub_reset_00 = rospy.Publisher('Reset_00', Bool, queue_size=1)
 
 class data_subscriber:
@@ -99,8 +97,8 @@ class data_subscriber:
         
         # Subcribe the resume signal, reward, terimnal from action.py
         self.sub_DQN_resume = rospy.Subscriber('DQN_resume', Int64, self.callback_pending)
-        self.sub_reward = rospy.Subscriber('reward', Float32, self.callback_reward)
-        self.sub_terminal = rospy.Subscriber('terminal', Bool, self.callback_terminal)
+        self.sub_reward = rospy.Subscriber('DQN_reward', Float32, self.callback_reward)
+        self.sub_terminal = rospy.Subscriber('DQN_terminal', Bool, self.callback_terminal)
         self.sub_reset_00 = rospy.Subscriber('Reset_00', Bool, self.callback_reset)
 
     def callback_pending(self, data):
@@ -269,6 +267,7 @@ class DQNAgent:
             self.sub_from_action.DQN_resume = 0 
             rospy.sleep(0.1)
             print("DQN code is Pended")
+            
             # pending loop
             while True:             
         # 5. Transfer the resume signal and action index to Action.py when receive the DQN resume signal from action.py
