@@ -106,7 +106,7 @@ sudo apt-get install libgstreamer-plugins-base1.0-dev
 
 ```
 1. DONT_RUN=1 make px4_sitl_default gazebo
-2. source Tools/setup_gazebo.bash $(pwd) $(pwd)/build/px_sitl_default
+2. source Tools/setup_gazebo.bash $(pwd) $(pwd)/build/px4_sitl_default
 3. export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:$(pwd):$(pwd)/Tools/sitl_gazebo
 4. roslaunch px4 multi_uav_mavros_sitl.launch
 ```
@@ -117,7 +117,7 @@ sudo apt-get install libgstreamer-plugins-base1.0-dev
 ```
 rosservice call /uav2/mavros/set_mode "base_mode: 0 custom_mode: 'OFFBOARD'"
 rosservice call /uav2/mavros/cmd/arming "value: true"
-'rostopic pub -r 10 /uav2/mavros/set_point/raw'
+'rostopic pub -r 10 /uav2/mavros/setpoint_raw/local '
 ```
 
 
